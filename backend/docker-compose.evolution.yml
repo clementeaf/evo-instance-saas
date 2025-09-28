@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: evolution_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: evolution123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - evolution_network
+
+  # Evolution API v2
+  evolution-api:
+    image: atendai/evolution-api:v2.0.0
+    container_name: evolution_api
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      # Server Configuration
+      SERVER_URL: http://localhost:8080
+      PORT: 8080
+
+      # Database Configuration
+      DATABASE_ENABLED: true
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: 'postgresql://evolution:evolution123@postgres:5432/evolution?schema=public'
+
+      # Data Saving Configuration
+      DATABASE_SAVE_DATA_INSTANCE: true
+      DATABASE_SAVE_DATA_NEW_MESSAGE: true
+      DATABASE_SAVE_MESSAGE_UPDATE: true
+      DATABASE_SAVE_DATA_CONTACTS: true
+      DATABASE_SAVE_DATA_CHATS: true
+      DATABASE_SAVE_DATA_LABELS: true
+      DATABASE_SAVE_DATA_HISTORIC: true
+
+      # Authentication Configuration
+      AUTHENTICATION_API_KEY: 'your-api-key-here'
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: true
+
+      # Webhook Configuration
+      WEBHOOK_GLOBAL_ENABLED: true
+      WEBHOOK_GLOBAL_URL: 'https://your-webhook-url.com/webhooks/wa'
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: false
+
+      # Storage Configuration
+      STORE_MESSAGES: true
+      STORE_MESSAGE_UP: true
+      STORE_CONTACTS: true
+      STORE_CHATS: true
+
+      # Redis Configuration (Optional)
+      REDIS_ENABLED: false
+
+      # Logs Configuration
+      LOG_LEVEL: INFO
+      LOG_COLOR: true
+
+    depends_on:
+      - postgres
+    networks:
+      - evolution_network
+
+volumes:
+  postgres_data:
+
+networks:
+  evolution_network:
+    driver: bridge
