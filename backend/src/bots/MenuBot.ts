@@ -1,5 +1,6 @@
 import type { BotContext } from "./runtime";
 import { ReservationsBasicBot } from "./ReservationsBasicBot";
+import { SimpleAI } from "./SimpleAI";
 
 export class MenuBot {
   static key = "menu-basic";
@@ -23,6 +24,16 @@ export class MenuBot {
     }
 
     if (text === "3") {
+      await ctx.setState({
+        botKey: SimpleAI.key,
+        fsm: "CHAT",
+        data: {}
+      });
+      await ctx.sendText(ctx.from, "🤖 *Asistente IA activado*\n\nAhora puedes hacerme cualquier pregunta. Escribe *MENÚ* para volver al inicio.");
+      return;
+    }
+
+    if (text === "4") {
       await ctx.sendText(ctx.from, "👤 *Conectándote con un agente...*\n\nEn breve te contactaremos. Responde *MENÚ* para volver al inicio.");
       return;
     }
@@ -32,7 +43,8 @@ export class MenuBot {
       "👋 *Bienvenido*",
       "1) Reservar una cita",
       "2) Consultar/confirmar pago",
-      "3) Hablar con un agente",
+      "3) Asistente IA 🤖",
+      "4) Hablar con un agente",
       "",
       "Responde con el número de la opción."
     ].join("\n");

@@ -22,7 +22,7 @@ export class EvolutionClient {
       baseURL: baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        ...(apiKey && { 'Authorization': `Bearer ${apiKey}` }),
+        ...(apiKey && { 'apikey': apiKey }),
       },
     });
   }
@@ -89,10 +89,26 @@ export class EvolutionClient {
   }
 
   async sendText(params: SendTextParams): Promise<any> {
-    try {
-      const response = await this.client.post(`/instances/${params.instanceName}/messages/text`, {
+    // Check if dry-run mode is enabled
+    if (process.env.EVOLUTION_DRY_RUN === 'true') {
+      console.log(`🧪 DRY RUN: Would send message to ${params.to}: "${params.body}"`);
+      return {
+        success: true,
+        message: 'Message queued for sending (dry-run mode)',
+        messageId: `dry_run_${Date.now()}`,
         to: params.to,
-        body: params.body,
+        text: params.body,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    try {
+      // Use the correct endpoint for Evolution API v1.7.4
+      const response = await this.client.post(`/message/sendText/${params.instanceName}`, {
+        number: params.to.replace('+', ''), // Remove + from phone number
+        textMessage: {
+          text: params.body
+        }
       });
       return response.data;
     } catch (error) {

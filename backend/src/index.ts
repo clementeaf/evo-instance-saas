@@ -3,12 +3,17 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import { config } from './config';
 import webhookRouter from './router/webhook';
+import apiRouter from './router/api';
 
 const app = express();
 
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// API Routes
+app.use('/api/v1', apiRouter);
+
+// Webhook Routes
 app.use('/webhooks', webhookRouter);
 
 app.get('/health', (req, res) => {

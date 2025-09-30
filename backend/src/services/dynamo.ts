@@ -73,3 +73,37 @@ export async function deleteItem(params: Omit<DeleteCommandInput, 'TableName'> &
   const command = new DeleteCommand(params);
   return await ddb.send(command);
 }
+
+// Service class for easier usage
+export class DynamoDBService {
+  async put(tableName: string, item: any) {
+    return await put({ TableName: tableName, Item: item });
+  }
+
+  async get(tableName: string, key: any) {
+    const result = await get({ TableName: tableName, Key: key });
+    return result.Item;
+  }
+
+  async update(tableName: string, key: any, updateParams: any) {
+    return await update({
+      TableName: tableName,
+      Key: key,
+      ...updateParams
+    });
+  }
+
+  async scan(tableName: string, scanParams: any = {}) {
+    const { ScanCommand } = require('@aws-sdk/lib-dynamodb');
+    const command = new ScanCommand({
+      TableName: tableName,
+      ...scanParams
+    });
+    const result = await ddb.send(command) as any;
+    return result.Items;
+  }
+
+  async delete(tableName: string, key: any) {
+    return await deleteItem({ TableName: tableName, Key: key });
+  }
+}

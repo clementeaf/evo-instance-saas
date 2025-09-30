@@ -2,10 +2,15 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const serverConfig = {
+  port: parseInt(process.env.PORT || '3000', 10),
+  nodeEnv: process.env.NODE_ENV || 'development',
+};
+
 export const config = {
   server: {
-    port: parseInt(process.env.PORT || '3000', 10),
-    nodeEnv: process.env.NODE_ENV || 'development',
+    ...serverConfig,
+    publicUrl: process.env.PUBLIC_WEBHOOK_URL || `http://localhost:${serverConfig.port}`,
   },
   evolutionApi: {
     baseUrl: process.env.EVOLUTION_API_BASE_URL || '',
@@ -27,5 +32,9 @@ export const config = {
   },
   s3: {
     bucketName: process.env.S3_BUCKET_NAME || '',
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
   },
 };
