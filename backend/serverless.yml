@@ -1,0 +1,208 @@
+service: evo-instance-saas
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 30
+
+  # Environment variables
+  environment:
+    NODE_ENV: development
+    PORT: 3000
+    DYNAMODB_TABLE_PREFIX: ${self:service}-${self:provider.stage}
+    DYNAMO_TABLE_SLOTS: ${self:service}-${self:provider.stage}-slots
+    DYNAMO_TABLE_BOOKINGS: ${self:service}-${self:provider.stage}-bookings
+    EVOLUTION_API_BASE_URL: ${env:EVOLUTION_API_BASE_URL}
+    EVOLUTION_API_TOKEN: ${env:EVOLUTION_API_TOKEN}
+    PUBLIC_WEBHOOK_URL: ${env:PUBLIC_WEBHOOK_URL, 'https://api.yourdomain.com'}
+    WA_WEBHOOK_SECRET: ${env:WA_WEBHOOK_SECRET, 'change-this-secret'}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-3.5-turbo'}
+    SQS_QUEUE_URL: !Ref WebhookQueue
+    DYNAMO_ENDPOINT: '' # Force empty to use AWS DynamoDB, not local
+
+  # IAM Permissions
+  iam:
+    role:
+      statements:
+        # DynamoDB permissions
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:BatchGetItem
+            - dynamodb:BatchWriteItem
+            - dynamodb:DescribeTable
+            - dynamodb:CreateTable
+            - dynamodb:UpdateTimeToLive
+          Resource:
+            - !GetAtt InstancesTable.Arn
+            - !GetAtt APIKeysTable.Arn
+            - !GetAtt SlotsTable.Arn
+            - !GetAtt BookingsTable.Arn
+            - !GetAtt ConversationStatesTable.Arn
+            # Allow auto-creation of any table with prefix
+            - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${self:service}-${self:provider.stage}_*'
+            - Fn::Join:
+              - ''
+              - - !GetAtt InstancesTable.Arn
+                - '/index/*'
+            - Fn::Join:
+              - ''
+              - - !GetAtt APIKeysTable.Arn
+                - '/index/*'
+
+        # SQS permissions
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource: !GetAtt WebhookQueue.Arn
+
+functions:
+  # API Functions
+  api:
+    handler: dist/lambda.handler
+    events:
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+
+  # Webhook worker
+  webhookWorker:
+    handler: dist/worker/lambda.handler
+    events:
+      - sqs:
+          arn: !GetAtt WebhookQueue.Arn
+          batchSize: 10
+
+# CloudFormation Resources
+resources:
+  Resources:
+    # DynamoDB Tables
+    InstancesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-instances
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: tenantId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: tenantId-index
+            KeySchema:
+              - AttributeName: tenantId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+
+    APIKeysTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-api-keys
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: key
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: key-index
+            KeySchema:
+              - AttributeName: key
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    SlotsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-slots
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: slotId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: slotId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl
+
+    BookingsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-bookings
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: bookingId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: bookingId
+            KeyType: HASH
+
+    ConversationStatesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-conversation-states
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl
+
+    # SQS Queue for webhooks
+    WebhookQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-webhooks
+        VisibilityTimeout: 300
+        MessageRetentionPeriod: 1209600 # 14 days
+        ReceiveMessageWaitTimeSeconds: 20
+
+  # Outputs
+  Outputs:
+    ApiEndpoint:
+      Description: "API Gateway endpoint URL"
+      Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+    WebhookQueueUrl:
+      Description: "SQS Queue URL for webhooks"
+      Value: !Ref WebhookQueue
+
+    InstancesTableName:
+      Description: "DynamoDB Instances Table"
+      Value: !Ref InstancesTable
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 8200

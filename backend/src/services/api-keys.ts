@@ -1,6 +1,7 @@
 import { DynamoDBService } from './dynamo';
 import { APIKey } from '../models/api-types';
-import { nanoid } from 'nanoid';
+// Use CommonJS version of nanoid for Lambda compatibility
+const { nanoid } = require('nanoid');
 import crypto from 'crypto';
 
 export class APIKeyService {
