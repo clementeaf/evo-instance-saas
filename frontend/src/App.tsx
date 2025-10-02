@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { CreateInstance } from './components/CreateInstance';
 import { api } from './api/client';
 import type { Instance } from './types';
+import { useWebSocket } from './hooks/useWebSocket';
 
 function App() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -9,6 +10,30 @@ function App() {
   const [qrCodes, setQrCodes] = useState<Record<string, string>>({});
   const [loadingQR, setLoadingQR] = useState<Record<string, boolean>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // WebSocket for real-time updates (using test tenant)
+  useWebSocket('test-tenant', {
+    onQRReady: ({ instanceId, qrCode }) => {
+      console.log('📡 QR Ready received:', instanceId);
+      setQrCodes(prev => ({ ...prev, [instanceId]: qrCode }));
+      setLoadingQR(prev => ({ ...prev, [instanceId]: false }));
+    },
+    onConnectionStatus: ({ instanceId, status }) => {
+      console.log('📡 Connection status received:', instanceId, status);
+      setInstances(prev => prev.map(i =>
+        i.id === instanceId ? { ...i, status: status as Instance['status'] } : i
+      ));
+
+      // Remove QR code when connected
+      if (status === 'connected') {
+        setQrCodes(prev => {
+          const newQrCodes = { ...prev };
+          delete newQrCodes[instanceId];
+          return newQrCodes;
+        });
+      }
+    }
+  });
 
   // Load instances on mount
   useEffect(() => {
@@ -51,47 +76,18 @@ function App() {
     setLoadingQR({ ...loadingQR, [instanceId]: true });
     try {
       const qrData = await api.getQRCode(instanceId);
+      // QR will be set via WebSocket event 'qr:ready'
+      // But set it here as fallback
       setQrCodes({ ...qrCodes, [instanceId]: qrData.qr_code });
+      setLoadingQR({ ...loadingQR, [instanceId]: false });
 
-      // Start polling for connection status
-      startPolling(instanceId);
+      // No need for polling anymore, WebSocket will notify us
     } catch (err: any) {
       alert(err.message || 'Error al obtener QR');
-    } finally {
       setLoadingQR({ ...loadingQR, [instanceId]: false });
     }
   };
 
-  const startPolling = (instanceId: string) => {
-    const pollInterval = setInterval(async () => {
-      try {
-        const updated = await api.getInstance(instanceId);
-
-        // Update instance in list
-        setInstances(prev => prev.map(i =>
-          i.id === instanceId ? updated : i
-        ));
-
-        // Stop polling if connected or error
-        if (updated.status === 'connected' || updated.status === 'error') {
-          clearInterval(pollInterval);
-
-          // Remove QR if connected
-          if (updated.status === 'connected') {
-            const newQrCodes = { ...qrCodes };
-            delete newQrCodes[instanceId];
-            setQrCodes(newQrCodes);
-          }
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-        clearInterval(pollInterval);
-      }
-    }, 3000); // Poll every 3 seconds
-
-    // Store interval ID to clean up later
-    return pollInterval;
-  };
 
   const handleSendMessage = async (instanceId: string) => {
     const to = prompt('Número con código país (ej: +1234567890):');

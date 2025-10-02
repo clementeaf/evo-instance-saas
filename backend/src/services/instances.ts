@@ -3,11 +3,13 @@ import { WhatsAppInstance } from '../models/api-types';
 import { EvolutionClient } from './evolution';
 import { config } from '../config';
 import { nanoid } from 'nanoid';
+import { WebSocketService } from './websocket';
 
 export class InstanceService {
   private tableName: string;
   private dynamo: DynamoDBService;
   private evolutionClient: EvolutionClient;
+  private wsService: WebSocketService;
 
   constructor() {
     this.tableName = `${process.env.DYNAMODB_TABLE_PREFIX || 'evo-saas'}_instances`;
@@ -16,6 +18,7 @@ export class InstanceService {
       config.evolutionApi.baseUrl,
       config.evolutionApi.token
     );
+    this.wsService = WebSocketService.getInstance();
   }
 
   async createInstance(tenantId: string, name: string, webhookUrl?: string): Promise<WhatsAppInstance> {
@@ -149,6 +152,9 @@ export class InstanceService {
           qrCode: connectResult.base64
         });
 
+        // Emit QR ready event via WebSocket
+        this.wsService.emitQRReady(tenantId, instanceId, connectResult.base64);
+
         return connectResult.base64;
       }
 
@@ -160,11 +166,19 @@ export class InstanceService {
   }
 
   async updateInstanceStatus(instanceId: string, status: WhatsAppInstance['status']): Promise<void> {
+    // Get instance to emit to correct tenant
+    const instance = await this.dynamo.get(this.tableName, { id: instanceId });
+
     await this.updateInstance(instanceId, {
       status,
       ...(status === 'connected' ? { connectedAt: Date.now() } : {}),
       lastActivity: Date.now()
     });
+
+    // Emit status update via WebSocket
+    if (instance) {
+      this.wsService.emitConnectionStatus(instance.tenantId, instanceId, status);
+    }
   }
 
   async deleteInstance(instanceId: string, tenantId: string): Promise<boolean> {
