@@ -55,6 +55,7 @@ router.post('/', authMiddleware.requirePermission('instances:create'), async (re
       data: {
         id: instance.id,
         name: instance.name,
+        evolution_instance_name: instance.evolutionInstanceName,
         status: instance.status,
         created_at: new Date(instance.createdAt).toISOString(),
         webhook_url: instance.webhookUrl
@@ -90,6 +91,7 @@ router.get('/:instanceId', authMiddleware.requirePermission('instances:read'), a
       data: {
         id: instance.id,
         name: instance.name,
+        evolution_instance_name: instance.evolutionInstanceName,
         status: instance.status,
         created_at: new Date(instance.createdAt).toISOString(),
         connected_at: instance.connectedAt ? new Date(instance.connectedAt).toISOString() : null,
@@ -116,6 +118,7 @@ router.get('/', authMiddleware.requirePermission('instances:read'), async (req: 
     const formattedInstances = instances.map(instance => ({
       id: instance.id,
       name: instance.name,
+      evolution_instance_name: instance.evolutionInstanceName,
       status: instance.status,
       created_at: new Date(instance.createdAt).toISOString(),
       connected_at: instance.connectedAt ? new Date(instance.connectedAt).toISOString() : null,

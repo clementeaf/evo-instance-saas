@@ -82,7 +82,30 @@ export class InstanceService {
         return null;
       }
 
-      return item as WhatsAppInstance;
+      const instance = item as WhatsAppInstance;
+
+      // Sync status with Evolution API if not connected
+      if (instance.status !== 'connected' && instance.evolutionInstanceName) {
+        try {
+          const evolutionState = await this.evolutionClient.getInstance(instance.evolutionInstanceName);
+
+          // Check if instance is connected in Evolution API
+          if (evolutionState?.instance?.state === 'open') {
+            // Update to connected
+            await this.updateInstance(instanceId, {
+              status: 'connected',
+              connectedAt: Date.now(),
+              lastActivity: Date.now()
+            });
+            instance.status = 'connected';
+            instance.connectedAt = Date.now();
+          }
+        } catch (err) {
+          console.error('Error syncing with Evolution API:', err);
+        }
+      }
+
+      return instance;
     } catch (error) {
       console.error('Error getting instance:', error);
       return null;

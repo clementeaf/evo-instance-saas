@@ -105,7 +105,7 @@ function App() {
 
     try {
       await api.sendMessage({
-        instance_id: instance.name,
+        instance_id: instance.evolution_instance_name,
         to: to.trim(),
         message: message.trim(),
       });

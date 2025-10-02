@@ -1,6 +1,7 @@
 export interface Instance {
   id: string;
   name: string;
+  evolution_instance_name: string;
   status: 'creating' | 'waiting_qr' | 'connected' | 'disconnected' | 'error';
   created_at: string;
   connected_at?: string;
