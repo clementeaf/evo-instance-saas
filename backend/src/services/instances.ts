@@ -117,16 +117,16 @@ export class InstanceService {
         throw new Error('Instance is already connected');
       }
 
-      // Get QR code from Evolution API
-      const connectionState = await this.evolutionClient.getInstance(instance.evolutionInstanceName);
+      // Connect to Evolution API to get QR code
+      const connectResult = await this.evolutionClient.connectInstance(instance.evolutionInstanceName);
 
-      if (connectionState?.instance?.qrcode?.code) {
+      if (connectResult?.base64) {
         // Update instance with QR code
         await this.updateInstance(instanceId, {
-          qrCode: connectionState.instance.qrcode.code
+          qrCode: connectResult.base64
         });
 
-        return connectionState.instance.qrcode.code;
+        return connectResult.base64;
       }
 
       return null;

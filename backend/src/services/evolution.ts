@@ -88,6 +88,22 @@ export class EvolutionClient {
     }
   }
 
+  async connectInstance(instanceName: string): Promise<any> {
+    try {
+      const response = await this.client.get(`/instance/connect/${instanceName}`);
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError;
+        const customError = new Error(`Evolution API Error: ${axiosError.message}`) as any;
+        customError.status = axiosError.response?.status;
+        customError.data = axiosError.response?.data;
+        throw customError;
+      }
+      throw error;
+    }
+  }
+
   async sendText(params: SendTextParams): Promise<any> {
     // Check if dry-run mode is enabled
     if (process.env.EVOLUTION_DRY_RUN === 'true') {

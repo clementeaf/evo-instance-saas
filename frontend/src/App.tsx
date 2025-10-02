@@ -52,11 +52,45 @@ function App() {
     try {
       const qrData = await api.getQRCode(instanceId);
       setQrCodes({ ...qrCodes, [instanceId]: qrData.qr_code });
+
+      // Start polling for connection status
+      startPolling(instanceId);
     } catch (err: any) {
       alert(err.message || 'Error al obtener QR');
     } finally {
       setLoadingQR({ ...loadingQR, [instanceId]: false });
     }
+  };
+
+  const startPolling = (instanceId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const updated = await api.getInstance(instanceId);
+
+        // Update instance in list
+        setInstances(prev => prev.map(i =>
+          i.id === instanceId ? updated : i
+        ));
+
+        // Stop polling if connected or error
+        if (updated.status === 'connected' || updated.status === 'error') {
+          clearInterval(pollInterval);
+
+          // Remove QR if connected
+          if (updated.status === 'connected') {
+            const newQrCodes = { ...qrCodes };
+            delete newQrCodes[instanceId];
+            setQrCodes(newQrCodes);
+          }
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+        clearInterval(pollInterval);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Store interval ID to clean up later
+    return pollInterval;
   };
 
   const handleSendMessage = async (instanceId: string) => {
@@ -180,21 +214,36 @@ function App() {
                       instance.status === 'error' ? 'bg-red-100 text-red-800' :
                       'bg-yellow-100 text-yellow-800'
                     }`}>
-                      {instance.status}
+                      {instance.status === 'waiting_qr' && qrCodes[instance.id]
+                        ? 'Escanea el QR'
+                        : instance.status === 'waiting_qr'
+                        ? 'Lista para conectar'
+                        : instance.status === 'connected'
+                        ? 'Conectada'
+                        : instance.status === 'error'
+                        ? 'Error'
+                        : instance.status}
                     </span>
                   </td>
                   <td className="border-b border-gray-300 p-3">
                     {instance.status === 'connected' ? (
                       <span className="text-green-600">✓ Conectado</span>
+                    ) : loadingQR[instance.id] ? (
+                      <div className="flex items-center gap-2">
+                        <div className="animate-spin h-5 w-5 border-2 border-black border-t-transparent rounded-full"></div>
+                        <span className="text-sm">Generando QR...</span>
+                      </div>
                     ) : qrCodes[instance.id] ? (
-                      <img src={qrCodes[instance.id]} alt="QR" className="w-32 h-32" />
+                      <div className="flex flex-col items-center gap-2">
+                        <img src={qrCodes[instance.id]} alt="QR" className="w-32 h-32" />
+                        <span className="text-xs text-gray-600 animate-pulse">⏳ Esperando conexión...</span>
+                      </div>
                     ) : (
                       <button
                         onClick={() => handleShowQR(instance.id)}
-                        disabled={loadingQR[instance.id]}
-                        className="px-3 py-1 border border-black bg-white hover:bg-gray-100 disabled:opacity-50"
+                        className="px-3 py-1 border border-black bg-white hover:bg-gray-100"
                       >
-                        {loadingQR[instance.id] ? 'Cargando...' : 'Mostrar QR'}
+                        Mostrar QR
                       </button>
                     )}
                   </td>
