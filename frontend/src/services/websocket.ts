@@ -49,11 +49,13 @@ class WebSocketService {
       console.log('✅ WebSocket connected');
       this.reconnectAttempts = 0;
 
-      // Subscribe to tenant
-      this.send({
-        action: 'subscribe',
-        tenantId
-      });
+      // Subscribe to tenant immediately (WebSocket is ready in onopen)
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({
+          action: 'subscribe',
+          tenantId
+        }));
+      }
     };
 
     this.ws.onmessage = (event) => {

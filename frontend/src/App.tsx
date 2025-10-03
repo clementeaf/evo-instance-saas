@@ -11,8 +11,8 @@ function App() {
   const [loadingQR, setLoadingQR] = useState<Record<string, boolean>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // WebSocket for real-time updates (using test tenant)
-  useWebSocket('test-tenant', {
+  // WebSocket for real-time updates (using mvp tenant)
+  useWebSocket('mvp', {
     onQRReady: ({ instanceId, qrCode }) => {
       console.log('📡 QR Ready received:', instanceId);
       setQrCodes(prev => ({ ...prev, [instanceId]: qrCode }));
@@ -99,7 +99,7 @@ function App() {
 
     try {
       await api.sendMessage({
-        instance_id: instance.evolution_instance_name,
+        instance_id: instance.id,
         to: to.trim(),
         message: message.trim(),
       });

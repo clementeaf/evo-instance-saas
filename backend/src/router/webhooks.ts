@@ -18,18 +18,39 @@ const instanceService = new InstanceService();
 router.post('/receive', async (req: Request, res: Response) => {
   try {
     const event = req.body;
-    const tenantId = req.headers['x-tenant-id'] as string;
-    const instanceId = req.headers['x-instance-id'] as string;
+
+    // Extract evolution instance name from event
+    const evolutionInstanceName = event.instance || event.instanceName || event.data?.instance?.instanceName;
+
+    if (!evolutionInstanceName) {
+      console.log('⚠️ Webhook received without instance name:', event);
+      return res.status(200).json({ success: false, error: 'No instance name' });
+    }
+
+    // Find our instance by evolution instance name
+    const instances = await instanceService.getInstances('mvp'); // Default tenant for now
+    const instance = instances.find(i => i.evolutionInstanceName === evolutionInstanceName);
+
+    if (!instance) {
+      console.log(`⚠️ Instance not found: ${evolutionInstanceName}`);
+      return res.status(200).json({ success: false, error: 'Instance not found' });
+    }
+
+    const tenantId = instance.tenantId;
+    const instanceId = instance.id;
 
     console.log('📞 Webhook received:', {
       event: event.event,
+      evolutionInstanceName,
       tenantId,
       instanceId,
       timestamp: new Date().toISOString()
     });
 
-    // Handle different event types
-    switch (event.event) {
+    // Handle different event types (normalize event names)
+    const eventType = event.event.toUpperCase().replace(/\./g, '_');
+
+    switch (eventType) {
       case 'CONNECTION_UPDATE':
         await handleConnectionUpdate(event, tenantId, instanceId);
         break;
