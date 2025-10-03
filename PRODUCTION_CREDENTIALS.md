@@ -27,6 +27,7 @@
 ## ☁️ **Backend AWS (Lambda + API Gateway)**
 
 **API Gateway URL:** `https://7t026jebb9.execute-api.us-east-1.amazonaws.com`
+**WebSocket URL:** `wss://z3ska4pqpa.execute-api.us-east-1.amazonaws.com/dev`
 
 **Endpoints:**
 - Health: `/health`
@@ -36,6 +37,7 @@
 - Get QR Code: `GET /api/v1/instances/:id/qr`
 - Send Message: `POST /api/v1/messages/send`
 - Bulk Messages: `POST /api/v1/messages/bulk`
+- Webhook Receive: `POST /api/v1/webhooks/receive`
 
 **API Key para testing:**
 - Development: `pk_live_test` (solo en dev mode)

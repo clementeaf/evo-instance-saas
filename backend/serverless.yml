@@ -25,6 +25,15 @@ provider:
     OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-3.5-turbo'}
     SQS_QUEUE_URL: !Ref WebhookQueue
     DYNAMO_ENDPOINT: '' # Force empty to use AWS DynamoDB, not local
+    WEBSOCKET_API_ENDPOINT:
+      Fn::Join:
+        - ''
+        - - 'https://'
+          - !Ref WebsocketsApi
+          - '.execute-api.'
+          - !Ref AWS::Region
+          - '.amazonaws.com/'
+          - ${self:provider.stage}
 
   # IAM Permissions
   iam:
@@ -50,6 +59,7 @@ provider:
             - !GetAtt SlotsTable.Arn
             - !GetAtt BookingsTable.Arn
             - !GetAtt ConversationStatesTable.Arn
+            - !GetAtt WebSocketConnectionsTable.Arn
             # Allow auto-creation of any table with prefix
             - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${self:service}-${self:provider.stage}_*'
             - Fn::Join:
@@ -60,6 +70,13 @@ provider:
               - ''
               - - !GetAtt APIKeysTable.Arn
                 - '/index/*'
+
+        # WebSocket permissions
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebsocketsApi}/*'
 
         # SQS permissions
         - Effect: Allow
@@ -86,6 +103,25 @@ functions:
       - sqs:
           arn: !GetAtt WebhookQueue.Arn
           batchSize: 10
+
+  # WebSocket Functions
+  wsConnect:
+    handler: dist/websocket/handler.connect
+    events:
+      - websocket:
+          route: $connect
+
+  wsDisconnect:
+    handler: dist/websocket/handler.disconnect
+    events:
+      - websocket:
+          route: $disconnect
+
+  wsMessage:
+    handler: dist/websocket/handler.message
+    events:
+      - websocket:
+          route: $default
 
 # CloudFormation Resources
 resources:
@@ -177,6 +213,22 @@ resources:
           Enabled: true
           AttributeName: ttl
 
+    # WebSocket Connections Table
+    WebSocketConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}_ws_connections
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl
+
     # SQS Queue for webhooks
     WebhookQueue:
       Type: AWS::SQS::Queue
@@ -191,6 +243,10 @@ resources:
     ApiEndpoint:
       Description: "API Gateway endpoint URL"
       Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+    WebSocketEndpoint:
+      Description: "WebSocket API endpoint URL"
+      Value: !Sub "wss://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}"
 
     WebhookQueueUrl:
       Description: "SQS Queue URL for webhooks"

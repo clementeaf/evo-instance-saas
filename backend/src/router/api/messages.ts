@@ -1,17 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { AuthMiddleware } from '../../middleware/auth';
-import { EvolutionClient } from '../../services/evolution';
+import { MessagingProviderFactory } from '../../services/messaging';
 import { MessageRequest, MessageResponse, BulkMessageRequest } from '../../models/api-types';
-import { config } from '../../config';
+import { InstanceService } from '../../services/instances';
 import { nanoid } from 'nanoid';
 
 const router = Router();
 const authMiddleware = new AuthMiddleware();
-
-const evolutionClient = new EvolutionClient(
-  config.evolutionApi.baseUrl,
-  config.evolutionApi.token
-);
+const messagingProvider = MessagingProviderFactory.getInstance();
+const instanceService = new InstanceService();
 
 // Apply authentication and rate limiting to all routes
 router.use(authMiddleware.authenticate);
@@ -21,6 +18,7 @@ router.use(authMiddleware.rateLimit(60)); // 60 requests per minute
 router.post('/send', authMiddleware.requirePermission('messages:send'), async (req: Request, res: Response) => {
   try {
     const messageRequest: MessageRequest = req.body;
+    const tenantId = req.tenantId!;
 
     // Validate required fields
     if (!messageRequest.instance_id || !messageRequest.to || !messageRequest.message) {
@@ -38,41 +36,58 @@ router.post('/send', authMiddleware.requirePermission('messages:send'), async (r
       });
     }
 
-    const messageId = `msg_${nanoid(16)}`;
-
     try {
-      // Send message via Evolution API
-      const result = await evolutionClient.sendText({
-        instanceName: messageRequest.instance_id,
-        to: messageRequest.to,
-        body: messageRequest.message
-      });
+      // Get instance to retrieve evolutionInstanceName
+      const instance = await instanceService.getInstance(messageRequest.instance_id, tenantId);
+
+      if (!instance) {
+        return res.status(404).json({
+          error: 'Instance not found',
+          message: 'The specified instance does not exist or you do not have access to it'
+        });
+      }
+
+      if (instance.status !== 'connected') {
+        return res.status(400).json({
+          error: 'Instance not connected',
+          message: `Instance is ${instance.status}. It must be connected to send messages.`
+        });
+      }
+
+      // Send message via messaging provider using evolutionInstanceName
+      const result = await messagingProvider.sendMessage(
+        instance.evolutionInstanceName,
+        messageRequest.to,
+        messageRequest.message
+      );
 
       const response: MessageResponse = {
-        id: messageId,
-        status: 'sent',
-        timestamp: Date.now(),
+        id: result.messageId,
+        status: result.success ? 'sent' : 'failed',
+        timestamp: result.timestamp,
         instance_id: messageRequest.instance_id,
-        to: messageRequest.to
+        to: messageRequest.to,
+        error: result.error
       };
 
-      console.log(`✅ Message sent via API: ${messageId} to ${messageRequest.to}`);
+      console.log(`✅ Message sent via ${messagingProvider.getProviderName()}: ${result.messageId} to ${messageRequest.to}`);
 
-      res.status(200).json({
-        success: true,
-        data: response
+      res.status(result.success ? 200 : 500).json({
+        success: result.success,
+        data: response,
+        ...(result.error && { error: result.error })
       });
 
-    } catch (evolutionError: any) {
-      console.error('Evolution API error:', evolutionError);
+    } catch (providerError: any) {
+      console.error('Messaging provider error:', providerError);
 
       const response: MessageResponse = {
-        id: messageId,
+        id: `msg_${nanoid(16)}`,
         status: 'failed',
         timestamp: Date.now(),
         instance_id: messageRequest.instance_id,
         to: messageRequest.to,
-        error: evolutionError.message || 'Failed to send message'
+        error: providerError.message || 'Failed to send message'
       };
 
       res.status(500).json({
@@ -96,6 +111,7 @@ router.post('/send', authMiddleware.requirePermission('messages:send'), async (r
 router.post('/bulk', authMiddleware.requirePermission('messages:send'), async (req: Request, res: Response) => {
   try {
     const bulkRequest: BulkMessageRequest = req.body;
+    const tenantId = req.tenantId!;
 
     if (!bulkRequest.instance_id || !bulkRequest.messages || !Array.isArray(bulkRequest.messages)) {
       return res.status(400).json({
@@ -115,6 +131,23 @@ router.post('/bulk', authMiddleware.requirePermission('messages:send'), async (r
       return res.status(400).json({
         error: 'Too many messages',
         message: 'Maximum 100 messages per bulk request'
+      });
+    }
+
+    // Get instance to retrieve evolutionInstanceName
+    const instance = await instanceService.getInstance(bulkRequest.instance_id, tenantId);
+
+    if (!instance) {
+      return res.status(404).json({
+        error: 'Instance not found',
+        message: 'The specified instance does not exist or you do not have access to it'
+      });
+    }
+
+    if (instance.status !== 'connected') {
+      return res.status(400).json({
+        error: 'Instance not connected',
+        message: `Instance is ${instance.status}. It must be connected to send messages.`
       });
     }
 
@@ -138,19 +171,20 @@ router.post('/bulk', authMiddleware.requirePermission('messages:send'), async (r
           continue;
         }
 
-        // Send message
-        await evolutionClient.sendText({
-          instanceName: bulkRequest.instance_id,
-          to: message.to,
-          body: message.message
-        });
+        // Send message via messaging provider using evolutionInstanceName
+        const result = await messagingProvider.sendMessage(
+          instance.evolutionInstanceName,
+          message.to,
+          message.message
+        );
 
         results.push({
-          id: messageId,
-          status: 'sent',
-          timestamp: Date.now(),
+          id: result.messageId,
+          status: result.success ? 'sent' : 'failed',
+          timestamp: result.timestamp,
           instance_id: bulkRequest.instance_id,
-          to: message.to
+          to: message.to,
+          error: result.error
         });
 
         // Small delay between messages to avoid rate limits

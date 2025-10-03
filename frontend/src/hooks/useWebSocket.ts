@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
-
-const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:8200';
+import { websocketService } from '../services/websocket';
 
 interface WebSocketEvents {
   onQRReady?: (data: { instanceId: string; qrCode: string }) => void;
@@ -10,53 +8,49 @@ interface WebSocketEvents {
 }
 
 export const useWebSocket = (tenantId: string, events: WebSocketEvents) => {
-  const socketRef = useRef<Socket | null>(null);
+  const eventsRef = useRef<WebSocketEvents>(events);
+  const handlersRef = useRef<Map<string, (data: any) => void>>(new Map());
+
+  // Keep events ref updated
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   useEffect(() => {
-    // Initialize WebSocket connection
-    const socket = io(WS_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5
-    });
+    // Connect using singleton service
+    websocketService.connect(tenantId);
 
-    socketRef.current = socket;
+    // Create event handlers
+    const qrHandler = (data: any) => {
+      eventsRef.current.onQRReady?.({ instanceId: data.instanceId, qrCode: data.qrCode });
+    };
 
-    socket.on('connect', () => {
-      console.log('✅ WebSocket connected');
-      // Subscribe to tenant updates
-      socket.emit('subscribe', { tenantId });
-    });
+    const statusHandler = (data: any) => {
+      eventsRef.current.onConnectionStatus?.({ instanceId: data.instanceId, status: data.status });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('🔌 WebSocket disconnected');
-    });
+    const updateHandler = (data: any) => {
+      eventsRef.current.onInstanceUpdate?.(data);
+    };
 
-    socket.on('connect_error', (error) => {
-      console.error('❌ WebSocket connection error:', error);
-    });
+    // Register handlers
+    websocketService.on('qr:ready', qrHandler);
+    websocketService.on('connection:status', statusHandler);
+    websocketService.on('instance:update', updateHandler);
 
-    // Event listeners
-    if (events.onQRReady) {
-      socket.on('qr:ready', events.onQRReady);
-    }
-
-    if (events.onConnectionStatus) {
-      socket.on('connection:status', events.onConnectionStatus);
-    }
-
-    if (events.onInstanceUpdate) {
-      socket.on('instance:update', events.onInstanceUpdate);
-    }
+    // Store handlers for cleanup
+    handlersRef.current.set('qr:ready', qrHandler);
+    handlersRef.current.set('connection:status', statusHandler);
+    handlersRef.current.set('instance:update', updateHandler);
 
     // Cleanup on unmount
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      handlersRef.current.forEach((handler, event) => {
+        websocketService.off(event, handler);
+      });
+      handlersRef.current.clear();
     };
-  }, [tenantId, events.onQRReady, events.onConnectionStatus, events.onInstanceUpdate]);
+  }, [tenantId]);
 
-  return socketRef.current;
+  return websocketService;
 };

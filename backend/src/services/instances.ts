@@ -1,6 +1,6 @@
 import { DynamoDBService } from './dynamo';
 import { WhatsAppInstance } from '../models/api-types';
-import { EvolutionClient } from './evolution';
+import { MessagingProvider, MessagingProviderFactory } from './messaging';
 import { config } from '../config';
 import { nanoid } from 'nanoid';
 import { WebSocketService } from './websocket';
@@ -8,28 +8,24 @@ import { WebSocketService } from './websocket';
 export class InstanceService {
   private tableName: string;
   private dynamo: DynamoDBService;
-  private evolutionClient: EvolutionClient;
+  private messagingProvider: MessagingProvider;
   private wsService: WebSocketService;
 
   constructor() {
     this.tableName = `${process.env.DYNAMODB_TABLE_PREFIX || 'evo-saas'}_instances`;
     this.dynamo = new DynamoDBService();
-    this.evolutionClient = new EvolutionClient(
-      config.evolutionApi.baseUrl,
-      config.evolutionApi.token
-    );
+    this.messagingProvider = MessagingProviderFactory.getInstance();
     this.wsService = WebSocketService.getInstance();
   }
 
   async createInstance(tenantId: string, name: string, webhookUrl?: string): Promise<WhatsAppInstance> {
     const instanceId = `inst_${nanoid(16)}`;
-    const evolutionInstanceName = `${tenantId}_${nanoid(8)}`;
 
     const instance: WhatsAppInstance = {
       id: instanceId,
       tenantId,
       name,
-      evolutionInstanceName,
+      evolutionInstanceName: '', // Will be set by provider
       status: 'creating',
       webhookUrl,
       createdAt: Date.now()
@@ -39,29 +35,40 @@ export class InstanceService {
       // Save to database first
       await this.dynamo.put(this.tableName, instance);
 
-      // Create instance in Evolution API
+      // Create instance using messaging provider
       const webhookConfig = webhookUrl || `${config.server.publicUrl}/api/v1/webhooks/receive`;
 
-      await this.evolutionClient.createInstance({
-        instanceName: evolutionInstanceName,
-        webhook: {
-          url: webhookConfig,
-          headers: {
-            'X-Tenant-Id': tenantId,
-            'X-Instance-Id': instanceId
-          }
-        }
-      });
+      const result = await this.messagingProvider.createInstance(
+        tenantId,
+        name,
+        webhookConfig
+      );
 
-      // Update status to waiting for QR
+      // Update instance with provider data
       const updatedInstance = {
         ...instance,
-        status: 'waiting_qr' as const
+        evolutionInstanceName: result.instanceId,
+        status: result.status,
+        ...(result.qrCode && { qrCode: result.qrCode })
       };
 
-      await this.updateInstance(instanceId, { status: 'waiting_qr' });
+      const updateData: any = {
+        evolutionInstanceName: result.instanceId,
+        status: result.status
+      };
 
-      console.log(`✅ Instance created: ${instanceId} (${evolutionInstanceName})`);
+      if (result.qrCode) {
+        updateData.qrCode = result.qrCode;
+      }
+
+      await this.updateInstance(instanceId, updateData);
+
+      console.log(`✅ Instance created: ${instanceId} (${result.instanceId}) via ${this.messagingProvider.getProviderName()}`);
+
+      // Emit QR code if available
+      if (result.qrCode) {
+        this.wsService.emitQRReady(tenantId, instanceId, result.qrCode);
+      }
 
       return updatedInstance;
 
@@ -87,13 +94,13 @@ export class InstanceService {
 
       const instance = item as WhatsAppInstance;
 
-      // Sync status with Evolution API if not connected
+      // Sync status with messaging provider if not connected
       if (instance.status !== 'connected' && instance.evolutionInstanceName) {
         try {
-          const evolutionState = await this.evolutionClient.getInstance(instance.evolutionInstanceName);
+          const connectionStatus = await this.messagingProvider.getConnectionStatus(instance.evolutionInstanceName);
 
-          // Check if instance is connected in Evolution API
-          if (evolutionState?.instance?.state === 'open') {
+          // Check if instance is connected
+          if (connectionStatus.status === 'connected') {
             // Update to connected
             await this.updateInstance(instanceId, {
               status: 'connected',
@@ -104,7 +111,7 @@ export class InstanceService {
             instance.connectedAt = Date.now();
           }
         } catch (err) {
-          console.error('Error syncing with Evolution API:', err);
+          console.error('Error syncing with messaging provider:', err);
         }
       }
 
@@ -143,19 +150,19 @@ export class InstanceService {
         throw new Error('Instance is already connected');
       }
 
-      // Connect to Evolution API to get QR code
-      const connectResult = await this.evolutionClient.connectInstance(instance.evolutionInstanceName);
+      // Get QR code from messaging provider
+      const qrCode = await this.messagingProvider.getQRCode(instance.evolutionInstanceName);
 
-      if (connectResult?.base64) {
+      if (qrCode) {
         // Update instance with QR code
         await this.updateInstance(instanceId, {
-          qrCode: connectResult.base64
+          qrCode: qrCode
         });
 
         // Emit QR ready event via WebSocket
-        this.wsService.emitQRReady(tenantId, instanceId, connectResult.base64);
+        this.wsService.emitQRReady(tenantId, instanceId, qrCode);
 
-        return connectResult.base64;
+        return qrCode;
       }
 
       return null;
@@ -189,13 +196,12 @@ export class InstanceService {
         return false;
       }
 
-      // Delete from Evolution API (best effort)
+      // Delete from messaging provider (best effort)
       try {
-        // Evolution API doesn't have a direct delete endpoint, so we disconnect
-        // This would need to be implemented based on Evolution API capabilities
-        console.log(`Disconnecting instance ${instance.evolutionInstanceName}`);
-      } catch (evolutionError) {
-        console.error('Error disconnecting from Evolution API:', evolutionError);
+        await this.messagingProvider.deleteInstance(instance.evolutionInstanceName);
+        console.log(`✅ Instance disconnected from provider: ${instance.evolutionInstanceName}`);
+      } catch (providerError) {
+        console.error('Error disconnecting from messaging provider:', providerError);
       }
 
       // Delete from database

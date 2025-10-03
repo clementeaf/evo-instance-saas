@@ -76,12 +76,10 @@ function App() {
     setLoadingQR({ ...loadingQR, [instanceId]: true });
     try {
       const qrData = await api.getQRCode(instanceId);
-      // QR will be set via WebSocket event 'qr:ready'
-      // But set it here as fallback
       setQrCodes({ ...qrCodes, [instanceId]: qrData.qr_code });
       setLoadingQR({ ...loadingQR, [instanceId]: false });
 
-      // No need for polling anymore, WebSocket will notify us
+      // WebSocket will notify us when connected via 'connection:status' event
     } catch (err: any) {
       alert(err.message || 'Error al obtener QR');
       setLoadingQR({ ...loadingQR, [instanceId]: false });
